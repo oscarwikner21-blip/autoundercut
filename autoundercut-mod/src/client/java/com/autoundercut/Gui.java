@@ -233,6 +233,29 @@ final class Gui {
 		return n;
 	}
 
+	/** Stackgroessen aller Stacks dieses Items im Inventar, groesste zuerst. */
+	static List<Integer> invStackCounts(String itemId) {
+		List<Integer> out = new ArrayList<>();
+		if (mc().player == null) return out;
+		Inventory inv = mc().player.getInventory();
+		for (int i = 0; i < 36; i++) {
+			ItemStack st = inv.getItem(i);
+			if (!st.isEmpty() && id(st).equals(itemId)) out.add(st.getCount());
+		}
+		out.sort(java.util.Comparator.reverseOrder());
+		return out;
+	}
+
+	static String invName(String itemId) {
+		if (mc().player == null) return itemId;
+		Inventory inv = mc().player.getInventory();
+		for (int i = 0; i < 36; i++) {
+			ItemStack st = inv.getItem(i);
+			if (!st.isEmpty() && id(st).equals(itemId)) return name(st);
+		}
+		return itemId;
+	}
+
 	static void pickupFromInventory(String itemId, int count) throws Bot.Fail {
 		List<Slot> sl = slots();
 		int cs = containerSize();

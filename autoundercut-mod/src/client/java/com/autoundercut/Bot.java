@@ -425,30 +425,41 @@ public final class Bot {
 		List<Job> jobs = new ArrayList<>();
 		for (List<Listing> g : groups.values()) {
 			Listing own = g.get(0);
-			long minComp = Long.MAX_VALUE;
+			// guenstigster Konkurrent (bei compareUnitPrice: pro Stueck gerechnet, sonst nur gleiche Stackgroesse)
+			Listing best = null;
 			for (Listing m : ctx.market.getOrDefault(own.itemId(), List.of())) {
-				if (!m.itemId().equals(own.itemId()) || m.count() != own.count()) continue;
+				if (!m.itemId().equals(own.itemId())) continue;
+				if (!cfg.compareUnitPrice && m.count() != own.count()) continue;
 				if (isMine(m, me)) continue;
-				minComp = Math.min(minComp, m.price());
+				if (best == null) {
+					best = m;
+				} else {
+					long lhs = m.price() * best.count();
+					long rhs = best.price() * m.count();
+					if (lhs < rhs || (lhs == rhs && m.count() == own.count())) best = m;
+				}
 			}
-			if (minComp == Long.MAX_VALUE) continue; // kein Konkurrent gesehen
-			if (own.price() < minComp) continue; // du bist schon der Günstigste
+			if (best == null) continue; // kein Konkurrent gesehen
+			// bist du pro Stueck schon guenstiger als der Konkurrent?
+			if (own.price() * best.count() < best.price() * own.count()) continue;
 			String label = own.name() + " x" + own.count();
 			String key = own.itemId() + "|" + own.count() + "|" + own.price();
-			long target = minComp - cfg.undercut;
+			long compForMyStack = best.price() * own.count() / best.count();
+			long target = compForMyStack - cfg.undercut;
 			if (target < 1) continue;
+			String compText = best.count() == own.count() ? "$" + fmt(best.price()) : "$" + fmt(best.price()) + " für " + best.count() + " Stück (= $" + fmt(compForMyStack) + " für " + own.count() + ")";
 			long minP = cfg.minPriceFor(own.itemId(), own.count());
 			if (minP > 0 && target < minP) {
-				note(key, "\u00a7e" + label + ": Konkurrent bei $" + fmt(minComp) + ", dein Mindestpreis $" + fmt(minP) + " verhindert das Unterbieten.");
+				note(key, "\u00a7e" + label + ": Konkurrent bei " + compText + ", dein Mindestpreis $" + fmt(minP) + " verhindert das Unterbieten.");
 				continue;
 			}
 			long floor = own.price() * (100 - cfg.maxDropPercent) / 100;
 			if (target < floor) {
-				note(key, "\u00a7e" + label + ": Konkurrent bei $" + fmt(minComp) + " liegt mehr als " + cfg.maxDropPercent
+				note(key, "\u00a7e" + label + ": Konkurrent bei " + compText + " liegt mehr als " + cfg.maxDropPercent
 						+ "% unter deinem Preis $" + fmt(own.price()) + " – übersprungen.");
 				continue;
 			}
-			note(key, (cfg.dryRun ? "\u00a76[Testlauf] " : "\u00a7a") + label + ": du $" + fmt(own.price()) + ", Konkurrent $" + fmt(minComp)
+			note(key, (cfg.dryRun ? "\u00a76[Testlauf] " : "\u00a7a") + label + ": du $" + fmt(own.price()) + ", Konkurrent " + compText
 					+ " → neuer Preis $" + fmt(target) + " (" + g.size() + " Stack" + (g.size() == 1 ? "" : "s") + ")");
 			for (Listing l : g) jobs.add(new Job(l.itemId(), l.name(), l.count(), l.price(), target));
 		}
@@ -481,6 +492,12 @@ public final class Bot {
 
 		// 2) neu einstellen
 		openAh(s);
+		listSteps(s, j, inv);
+		s.add(new Marker());
+	}
+
+	/** Stellt einen Stack aus dem Inventar ein (das /ah-Fenster ist offen). inv[1] = Anzahl dieser Stacks vorher. */
+	private void listSteps(List<Step> s, Job j, int[] inv) {
 		s.add(act(() -> Gui.clickButton(R_CREATE)));
 		s.add(until("Item-Auswahl öffnet sich nicht", 80, () -> Gui.hasButton(R_SETPRICE)));
 		s.add(pause(d()));
@@ -504,8 +521,59 @@ public final class Bot {
 		s.add(pause(20));
 		s.add(until("Angebot wurde nicht erstellt (Stack liegt noch im Inventar)", 100,
 				() -> Gui.invCount(j.itemId(), j.count()) < inv[1]));
-		s.add(act(() -> chat("\u00a7aNeu eingestellt: " + j.name() + " x" + j.count() + "  $" + fmt(j.oldPrice()) + " → $" + fmt(j.newPrice()))));
-		s.add(new Marker());
+		s.add(act(() -> {
+			if (j.oldPrice() > 0) {
+				chat("\u00a7aNeu eingestellt: " + j.name() + " x" + j.count() + "  $" + fmt(j.oldPrice()) + " → $" + fmt(j.newPrice()));
+			} else {
+				chat("\u00a7aEingestellt: " + j.name() + " x" + j.count() + " für $" + fmt(j.newPrice()));
+			}
+		}));
+	}
+
+	/**
+	 * Stellt Stacks aus dem Inventar ein (Befehl /autoah sell).
+	 * mode: "stack" = ein Stack, "half" = die Haelfte aller Stacks dieses Items, "all" = alle Stacks.
+	 * price gilt fuer den groessten der gewaehlten Stacks, kleinere Stacks werden anteilig berechnet.
+	 * @return Fehlertext oder null, wenn es losgeht.
+	 */
+	public String startSell(String itemId, long price, String mode, boolean fromHand) {
+		if (cycleActive) return "Die Mod ist gerade beschäftigt. Warte kurz oder schalte mit /autoah off aus.";
+		List<Integer> counts = Gui.invStackCounts(itemId);
+		if (counts.isEmpty()) return "Im Inventar ist kein " + itemId + ".";
+		List<Integer> pick = new ArrayList<>();
+		switch (mode) {
+			case "stack" -> pick.add(fromHand ? Gui.mc().player.getMainHandItem().getCount() : counts.get(0));
+			case "half" -> pick.addAll(counts.subList(0, Math.max(1, counts.size() / 2)));
+			case "all" -> pick.addAll(counts);
+			default -> {
+				return "Unbekannter Modus: " + mode + " (möglich: stack, half, all)";
+			}
+		}
+		if (pick.isEmpty() || !counts.contains(pick.get(0))) return "Dieser Stack liegt nicht im Inventar.";
+		pick.sort(java.util.Comparator.reverseOrder());
+		int ref = pick.get(0);
+		String name = Gui.invName(itemId);
+
+		cycleActive = true;
+		queue.clear();
+		ctx = new Ctx();
+		List<Step> s = new ArrayList<>();
+		long total = 0;
+		for (int c : pick) {
+			long p = Math.max(1, price * c / ref);
+			total += p;
+			int[] inv = new int[2];
+			Job j = new Job(itemId, name, c, 0, p);
+			openAh(s);
+			s.add(act(() -> inv[1] = Gui.invCount(j.itemId(), j.count())));
+			listSteps(s, j, inv);
+		}
+		int n = pick.size();
+		s.add(act(() -> chat("\u00a7aFertig: " + n + " Stack" + (n == 1 ? "" : "s") + " " + name + " eingestellt.")));
+		s.add(dyn(b -> b.finishOk()));
+		queue.addAll(s);
+		chat("Stelle " + n + " Stack" + (n == 1 ? "" : "s") + " " + name + " ein (zusammen $" + fmt(total) + ", größter Stack $" + fmt(price) + ").");
+		return null;
 	}
 
 	/** Wartet, bis der Amboss das Ergebnis aendert; falls nicht, wird zusaetzlich das Umbenennen-Paket geschickt. */

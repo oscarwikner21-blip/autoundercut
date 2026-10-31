@@ -29,7 +29,7 @@ final class Commands {
 		Config cfg = bot.cfg();
 		d.register(ClientCommands.literal("autoah")
 			.executes(c -> {
-				say(c, "Befehle: on, off, status, once, list, debug, set <wert> <zahl>, add [item], remove [item], min <preis>");
+				say(c, "Befehle: on, off, status, once, list, debug, sell <item|hand> <preis> <stack|half|all>, set <wert> <zahl>, add [item], remove [item], min <preis>");
 				return 1;
 			})
 			.then(ClientCommands.literal("on").executes(c -> {
@@ -57,6 +57,7 @@ final class Commands {
 				say(c, "Unterbieten um: $" + Bot.fmt(cfg.undercut) + " | Stacks pro Durchgang: " + cfg.maxRelistsPerCycle
 						+ " | Prüfintervall: " + cfg.checkIntervalSeconds + "s | Schutz: max. " + cfg.maxDropPercent + "% runter");
 				say(c, "Mindestpreise: " + (cfg.minPrice.isEmpty() ? "keine" : cfg.minPrice.toString()));
+				say(c, "Preis pro Item vergleichen: " + cfg.compareUnitPrice);
 				say(c, "Testlauf: " + cfg.dryRun + " | Seiten Markt/eigene: " + cfg.maxPagesMarket + "/" + cfg.maxPagesOwn
 						+ " | Klick-Pause: " + cfg.clickDelayTicks + " Ticks");
 				return 1;
@@ -67,6 +68,12 @@ final class Commands {
 						+ " (öffne dafür vorher das /ah-Fenster, sonst steht nur 'kein Fenster' drin)");
 				return 1;
 			}))
+			.then(ClientCommands.literal("sell")
+				.then(ClientCommands.argument("item", StringArgumentType.word())
+					.then(ClientCommands.argument("price", LongArgumentType.longArg(1))
+						.then(ClientCommands.literal("stack").executes(c -> sell(c, bot, "stack")))
+						.then(ClientCommands.literal("half").executes(c -> sell(c, bot, "half")))
+						.then(ClientCommands.literal("all").executes(c -> sell(c, bot, "all"))))))
 			.then(ClientCommands.literal("set")
 				.then(ClientCommands.argument("key", StringArgumentType.word())
 					.then(ClientCommands.argument("value", StringArgumentType.word())
@@ -104,6 +111,30 @@ final class Commands {
 					}))));
 	}
 
+	private static int sell(CommandContext<FabricClientCommandSource> c, Bot bot, String mode) {
+		String raw = StringArgumentType.getString(c, "item").trim().toLowerCase();
+		long price = LongArgumentType.getLong(c, "price");
+		String itemId;
+		boolean fromHand = false;
+		if (raw.equals("hand")) {
+			ItemStack h = hand();
+			if (h.isEmpty()) {
+				say(c, "\u00a7cDu hast nichts in der Hand. Nimm das Item in die Hand oder schreibe z. B. pumpkin statt hand.");
+				return 0;
+			}
+			itemId = Gui.id(h);
+			fromHand = true;
+		} else {
+			itemId = raw.contains(":") ? raw : "minecraft:" + raw;
+		}
+		String err = bot.startSell(itemId, price, mode, fromHand);
+		if (err != null) {
+			say(c, "\u00a7c" + err);
+			return 0;
+		}
+		return 1;
+	}
+
 	private static int addItem(CommandContext<FabricClientCommandSource> c, Config cfg, String id, boolean noItem) {
 		if (noItem) {
 			say(c, "\u00a7cHalte ein Item in der Hand oder schreibe die ID, z. B. /autoah add minecraft:pumpkin");
@@ -130,6 +161,7 @@ final class Commands {
 		try {
 			switch (key.toLowerCase()) {
 				case "dryrun" -> cfg.dryRun = Boolean.parseBoolean(value);
+				case "unitcompare" -> cfg.compareUnitPrice = Boolean.parseBoolean(value);
 				case "interval" -> cfg.checkIntervalSeconds = Math.max(1, Integer.parseInt(value));
 				case "undercut" -> cfg.undercut = Math.max(1, Long.parseLong(value));
 				case "stacks" -> cfg.maxRelistsPerCycle = Math.max(0, Integer.parseInt(value));
@@ -138,7 +170,7 @@ final class Commands {
 				case "ownpages" -> cfg.maxPagesOwn = Math.max(1, Integer.parseInt(value));
 				case "delay" -> cfg.clickDelayTicks = Math.max(1, Integer.parseInt(value));
 				default -> {
-					return "\u00a7cUnbekannt: " + key + ". Möglich: dryrun, interval, undercut, stacks, drop, marketpages, ownpages, delay";
+					return "\u00a7cUnbekannt: " + key + ". Möglich: dryrun, unitcompare, interval, undercut, stacks, drop, marketpages, ownpages, delay";
 				}
 			}
 		} catch (NumberFormatException e) {

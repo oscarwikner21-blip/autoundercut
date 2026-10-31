@@ -30,6 +30,8 @@ public final class Config {
 	public int maxPagesOwn = 4;
 	/** Wartezeit nach jedem Klick in Ticks (20 Ticks = 1 Sekunde). */
 	public int clickDelayTicks = 4;
+	/** true = Konkurrenz-Angebote mit anderer Stackgroesse werden ueber den Preis pro Item verglichen. */
+	public boolean compareUnitPrice = true;
 	/** Items, die automatisch unterboten werden (Item-IDs). */
 	public List<String> items = new ArrayList<>(List.of("minecraft:pumpkin"));
 	/** Mindestpreis pro Angebot. Schluessel "item-id@stackgroesse" oder nur "item-id". */
