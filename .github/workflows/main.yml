@@ -6,6 +6,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: autoundercut-mod
     steps:
       - name: checkout repository
         uses: actions/checkout@v6
@@ -22,4 +25,4 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: AutoUndercut-Mod
-          path: build/libs/*.jar
+          path: autoundercut-mod/build/libs/*.jar
