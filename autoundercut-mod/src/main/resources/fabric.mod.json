@@ -1,0 +1,21 @@
+{
+	"schemaVersion": 1,
+	"id": "autoundercut",
+	"version": "${version}",
+	"name": "Auto Undercut",
+	"description": "Unterbietet automatisch Konkurrenz-Angebote im /ah.",
+	"authors": ["du"],
+	"license": "MIT",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"com.autoundercut.AutoUndercutClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
